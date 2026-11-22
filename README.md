@@ -6,23 +6,23 @@ Works with **Expo** (managed workflow, EAS Update) and **bare React Native** (Me
 
 ## Install
 
-The CLI is a single zero-dependency Node script (Node ≥ 22). Install it globally, run it with `npx`, or add it to a project:
+The CLI is a single zero-dependency Node package (Node ≥ 22) with the compiled build committed, so it installs straight from GitHub without a build step.
 
 ```sh
-# from GitHub (no npm release needed)
-npm install -g github:emmadal/mobs
-pnpm add -g github:emmadal/mobs
-bun install -g github:emmadal/mobs
+# install globally
+npm install -g --install-links github:emmadal/mobs
 
 # or run without installing
-npx github:emmadal/mobs sourcemaps upload --help
+npx --yes --package github:emmadal/mobs mobs sourcemaps upload --help
 ```
 
 Inside a project (so CI can use it):
 
 ```sh
-npm install --save-dev github:emmadal/mobs
+npm install --save-dev --install-links github:emmadal/mobs
 ```
+
+> `--install-links` tells npm to copy the git checkout instead of symlinking it; without it npm points `node_modules` at a temporary clone that it then deletes. `npx` and `bun` do not need the flag.
 
 Credentials are the same for every command:
 
