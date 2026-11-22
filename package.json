@@ -26,7 +26,7 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "prepare": "tsc -p tsconfig.build.json"
+    "prepare": "npx --yes -p typescript@6.0.3 tsc -p tsconfig.build.json"
   },
   "devDependencies": {
     "@types/node": "^24",
