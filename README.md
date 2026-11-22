@@ -6,7 +6,7 @@ Works with **Expo** (managed workflow, EAS Update) and **bare React Native** (Me
 
 ## Install
 
-The CLI is a single zero-dependency Node package (Node ≥ 22) with the compiled build committed, so it installs straight from GitHub without a build step.
+The CLI is written in TypeScript (strict) and compiled to ESM; the committed `build/` is `tsc` output, so it installs straight from GitHub without a build step. It is a single zero-dependency Node package (Node ≥ 22).
 
 ```sh
 # install globally
@@ -26,10 +26,10 @@ npm install --save-dev --install-links github:emmadal/mobs
 
 Credentials are the same for every command:
 
-| Flag         | Environment variable | What it is                                                                           |
-| ------------ | -------------------- | ------------------------------------------------------------------------------------ |
-| `--endpoint` | `MOBS_ENDPOINT`      | Your dashboard URL, e.g. `https://observability.example.com`                         |
-| `--token`    | `MOBS_UPLOAD_TOKEN`  | The project's **upload token** (Settings → Keys — secret, not the public ingest key) |
+| Flag         | Environment variable | What it is                                                                                   |
+| ------------ | -------------------- | -------------------------------------------------------------------------------------------- |
+| `--endpoint` | `MOBS_ENDPOINT`      | Your dashboard URL, e.g. `https://observability.example.com`                                 |
+| `--token`    | `MOBS_UPLOAD_TOKEN`  | The project's **upload token** (Settings → project card — secret, not the public ingest key) |
 
 ## Expo (managed workflow)
 
@@ -42,7 +42,7 @@ eas update --json > update.json
 mobs sourcemaps upload-eas --dist dist --eas-json update.json
 ```
 
-`upload-eas` reads `update.json`, finds every runtime/platform map under `dist/_expo/static/js/**`, and uploads one map per `(runtimeVersion, platform)` with the matching `update:<id>` bundle key — exactly the key the SDK reports when an error happens inside that update.
+`upload-eas` reads `update.json`, finds the `.map` files under `dist/_expo/static/js/<platform>/`, and uploads each with the `update:<id>` bundle key for its platform — exactly the key the SDK reports when an error happens inside that update. A standard export contains one map per platform; if several exist, the server keeps the latest upload for that platform and update.
 
 To automate it, add a script to `package.json`:
 
@@ -54,33 +54,27 @@ To automate it, add a script to `package.json`:
 }
 ```
 
-and the credentials in `eas.json` (recommended: keep the token in EAS environment variables rather than the file):
+Keep the token out of `eas.json`: `build.env` is not a secret store, and a token placed there can leak with the build environment. Set `MOBS_ENDPOINT` and `MOBS_UPLOAD_TOKEN` in the CI job that runs the update, for example GitHub Actions:
 
-```json
-{
-  "cli": { "version": ">= 13.0.0" },
-  "build": {
-    "production": {
-      "env": {
-        "MOBS_ENDPOINT": "https://observability.example.com",
-        "MOBS_UPLOAD_TOKEN": "mobs_sk_…"
-      }
-    }
-  }
-}
+```yaml
+- run: eas update --json > update.json
+- run: npx --yes --package github:emmadal/mobs mobs sourcemaps upload-eas --dist dist --eas-json update.json
+  env:
+    MOBS_ENDPOINT: https://observability.example.com
+    MOBS_UPLOAD_TOKEN: ${{ secrets.MOBS_UPLOAD_TOKEN }}
 ```
 
-```sh
-eas env:create --name MOBS_UPLOAD_TOKEN --value mobs_sk_…   # then reference it
-```
+`eas.json` stays useful for build profiles. If an EAS build hook invokes the CLI, store the token as a **sensitive** EAS environment variable and reference it from the hook — never inline it in `env`.
 
 ### Local export
 
 ```sh
 npx expo export --source-maps
-mobs sourcemaps upload --platform ios --file dist/_expo/static/js/ios/*.map \
+mobs sourcemaps upload --platform ios --file path/to/ios.map \
   --app-version 1.4.2 --build 42
 ```
+
+`expo export` writes the maps under `dist/_expo/static/js/<platform>/`; pass the file for the platform you are uploading to `--file`.
 
 ## Bare React Native
 
@@ -97,18 +91,18 @@ mobs sourcemaps upload --platform android --file index.android.map \
   --app-version 1.4.2 --build 42
 ```
 
-iOS: use the `main.jsbundle`'s map produced by the Xcode build script phase, then `--platform ios --file ios/main.map`.
+iOS: upload the map your build produces. If your Xcode bundle phase sets `SOURCEMAP_FILE`, point `--file` at it; otherwise bundle with Metro as above.
 
 ## Compatibility
 
-|             | Expo (managed)                             | Bare React Native                             |
-| ----------- | ------------------------------------------ | --------------------------------------------- |
-| SDK runtime | ≥ SDK 56 (expo/fetch and XHR both tracked) | RN ≥ 0.83                                     |
-| Engine      | Hermes (and JSC)                           | Hermes (and JSC)                              |
-| Source maps | EAS Update (`upload-eas`), `expo export`   | Metro `--sourcemap-output`, Xcode build phase |
-| Bundle keys | `update:<updateId>`                        | `build:<appVersion>+<build>`                  |
+|             | Expo (managed)                             | Bare React Native                                         |
+| ----------- | ------------------------------------------ | --------------------------------------------------------- |
+| SDK runtime | ≥ SDK 56 (expo/fetch and XHR both tracked) | RN ≥ 0.83                                                 |
+| Engine      | Hermes (and JSC)                           | Hermes (and JSC)                                          |
+| Source maps | EAS Update (`upload-eas`), `expo export`   | Metro `--sourcemap-output` (or `SOURCEMAP_FILE` in Xcode) |
+| Bundle keys | `update:<updateId>`                        | `build:<appVersion>+<build>`                              |
 
-The dashboard symbolicates errors at ingest by matching the SDK-reported bundle key (`update:…` for EAS Updates, `build:…` for store/native builds) against the uploaded maps — the same map format works for both workflows.
+The compatibility range reflects the SDK's peer dependencies; the in-repo example runs Expo 58 / React Native 0.88. The dashboard symbolicates errors at ingest by matching the SDK-reported bundle key (`update:…` for EAS Updates, `build:…` for store/native builds) against the uploaded maps — the same map format works for both workflows.
 
 ## Commands
 

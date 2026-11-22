@@ -20,7 +20,7 @@ Upload the maps of an EAS Update (after \`eas update --json > update.json\`):
 
 Common flags (or environment variables):
   --endpoint  MOBS_ENDPOINT      Dashboard URL, e.g. https://observability.example.com
-  --token     MOBS_UPLOAD_TOKEN  Project upload token (Settings > Keys)
+  --token     MOBS_UPLOAD_TOKEN  Project upload token (Settings > project card)
 `;
 
 async function findMaps(dist: string, platform: Platform): Promise<string[]> {
