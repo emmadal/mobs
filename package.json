@@ -4,6 +4,7 @@
   "description": "mobs — upload source maps for mobile-observability (EAS Update and native builds). Works in Expo and bare React Native projects.",
   "license": "MIT",
   "author": "mobile-observability",
+  "type": "module",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/emmadal/mobs.git"
@@ -11,11 +12,10 @@
   "homepage": "https://github.com/emmadal/mobs#readme",
   "bugs": "https://github.com/emmadal/mobs/issues",
   "bin": {
-    "mobs": "mobs.mjs"
+    "mobs": "build/mobs.js"
   },
   "files": [
-    "mobs.mjs",
-    "lib.mjs",
+    "build",
     "README.md",
     "LICENSE"
   ],
@@ -23,9 +23,14 @@
     "node": ">=22"
   },
   "scripts": {
-    "test": "vitest run"
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "prepare": "tsc -p tsconfig.build.json"
   },
   "devDependencies": {
+    "@types/node": "^24",
+    "typescript": "~6.0.3",
     "vitest": "^5.1.1"
   }
 }

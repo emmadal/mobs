@@ -2,7 +2,7 @@ import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { bundleKey, parseFlags, updateIdsFromEasJson, uploadSourceMap } from './lib.mjs';
+import { bundleKey, parseFlags, updateIdsFromEasJson, uploadSourceMap } from './lib.js';
 
 describe('mobs CLI helpers', () => {
   it('parses flags in both forms', () => {
@@ -32,7 +32,7 @@ describe('mobs CLI helpers', () => {
     const dir = await mkdtemp(join(tmpdir(), 'mobs-'));
     const file = join(dir, 'main.jsbundle.map');
     await writeFile(file, '{"version":3,"sources":[],"mappings":""}');
-    const calls = [];
+    const calls: { url: string; init?: RequestInit }[] = [];
     const result = await uploadSourceMap({
       endpoint: 'https://obs.example.com',
       token: 'mobs_sk_x',
@@ -48,9 +48,12 @@ describe('mobs CLI helpers', () => {
       },
     });
     expect(result.bundleKey).toBe('build:1.0+1');
-    expect(calls[0].url).toBe(
+    expect(calls).toHaveLength(1);
+    const [call] = calls;
+    if (!call) throw new Error('fetch was not called');
+    expect(call.url).toBe(
       'https://obs.example.com/api/v1/sourcemaps?platform=ios&bundleKey=build%3A1.0%2B1&fileName=main.jsbundle.map',
     );
-    expect(calls[0].init.headers.authorization).toBe('Bearer mobs_sk_x');
+    expect(new Headers(call.init?.headers).get('authorization')).toBe('Bearer mobs_sk_x');
   });
 });
