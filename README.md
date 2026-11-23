@@ -6,17 +6,17 @@ Works with **Expo** (managed workflow, EAS Update) and **bare React Native** (Me
 
 ## Install
 
-A single zero-dependency Node package (Node ≥ 22) with no install scripts, written in strict TypeScript and compiled to ESM. The package is `@emmadalorg/cli`; the command it installs is `mobs`.
+A single zero-dependency Node package (Node ≥ 22) with no install scripts, written in strict TypeScript and compiled to ESM. The package is `@mobile-observability/cli`; the command it installs is `mobs`.
 
 ```sh
 # inside your app, so CI can use it
-npm install --save-dev @emmadalorg/cli   # or: pnpm add -D, yarn add -D, bun add -d
+npm install --save-dev @mobile-observability/cli   # or: pnpm add -D, yarn add -D, bun add -d
 
 # or run it once without installing
-npx --yes @emmadalorg/cli --help
+npx --yes @mobile-observability/cli --help
 
 # or install globally
-npm install -g @emmadalorg/cli
+npm install -g @mobile-observability/cli
 ```
 
 `mobs --version` prints the installed version.
@@ -63,7 +63,7 @@ Keep the token out of `eas.json`: `build.env` is not a secret store, and a token
 
 ```yaml
 - run: eas update --json > update.json
-- run: npx --yes @emmadalorg/cli sourcemaps upload-eas --dist dist --eas-json update.json
+- run: npx --yes @mobile-observability/cli sourcemaps upload-eas --dist dist --eas-json update.json
   env:
     MOBS_ENDPOINT: https://observability.example.com
     MOBS_UPLOAD_TOKEN: ${{ secrets.MOBS_UPLOAD_TOKEN }}
