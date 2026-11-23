@@ -1,5 +1,5 @@
 {
-  "name": "@mobile-observability/cli",
+  "name": "@emmadalorg/cli",
   "version": "0.1.0",
   "description": "mobs — upload source maps for mobile-observability (EAS Update and native builds). Works in Expo and bare React Native projects.",
   "keywords": [
