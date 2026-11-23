@@ -6,17 +6,22 @@ Works with **Expo** (managed workflow, EAS Update) and **bare React Native** (Me
 
 ## Install
 
-The CLI is written in TypeScript (strict) and compiled to ESM; the committed `build/` is `tsc` output, so it installs straight from GitHub without a build step. It is a single zero-dependency Node package (Node ≥ 22).
+A single zero-dependency Node package (Node ≥ 22) with no install scripts, written in strict TypeScript and compiled to ESM. The package is `@mobile-observability/cli`; the command it installs is `mobs`.
 
 ```sh
-# install globally
-npm install -g --install-links github:emmadal/mobs
+# inside your app, so CI can use it
+npm install --save-dev @mobile-observability/cli   # or: pnpm add -D, yarn add -D, bun add -d
 
-# or run without installing
-npx --yes --package github:emmadal/mobs mobs sourcemaps upload --help
+# or run it once without installing
+npx --yes @mobile-observability/cli --help
+
+# or install globally
+npm install -g @mobile-observability/cli
 ```
 
-Inside a project (so CI can use it):
+`mobs --version` prints the installed version.
+
+To try unreleased changes, install from GitHub. The committed `build/` is `tsc` output, so no build step runs:
 
 ```sh
 npm install --save-dev --install-links github:emmadal/mobs
@@ -58,7 +63,7 @@ Keep the token out of `eas.json`: `build.env` is not a secret store, and a token
 
 ```yaml
 - run: eas update --json > update.json
-- run: npx --yes --package github:emmadal/mobs mobs sourcemaps upload-eas --dist dist --eas-json update.json
+- run: npx --yes @mobile-observability/cli sourcemaps upload-eas --dist dist --eas-json update.json
   env:
     MOBS_ENDPOINT: https://observability.example.com
     MOBS_UPLOAD_TOKEN: ${{ secrets.MOBS_UPLOAD_TOKEN }}
@@ -93,6 +98,33 @@ mobs sourcemaps upload --platform android --file index.android.map \
 
 iOS: upload the map your build produces. If your Xcode bundle phase sets `SOURCEMAP_FILE`, point `--file` at it; otherwise bundle with Metro as above.
 
+## CI and Vercel
+
+`mobs` runs wherever Node ≥ 22 runs: GitHub Actions, EAS build hooks, a Vercel build. It needs no install scripts, so package managers that block them by default (pnpm, recent npm) install it unchanged.
+
+Every failure exits with code 1 and a one-line reason, so a CI step never passes with maps missing: an invalid token, a size limit, a redirect, an unreachable server, or an `upload-eas` run that finds no maps for a platform of the update.
+
+### In a Vercel build
+
+1. Add the CLI as a dev dependency (see [Install](#install)); Vercel installs devDependencies for the build.
+2. In **Project Settings → Environment Variables**, add `MOBS_ENDPOINT` and `MOBS_UPLOAD_TOKEN`, and mark the token **Sensitive**.
+3. Call it after the build step that writes `dist/` and `update.json`, for example as a `postbuild` script:
+
+   ```json
+   {
+     "scripts": {
+       "postbuild": "mobs sourcemaps upload-eas --dist dist --eas-json update.json"
+     }
+   }
+   ```
+
+Vercel's Node.js 22.x and newer images all satisfy the CLI's `engines` range.
+
+### A dashboard hosted on Vercel
+
+- **Size**: Vercel Functions accept request bodies up to 4.5 MB. `mobs` gzips each map, so most maps fit, but a larger one gets `413 FUNCTION_PAYLOAD_TOO_LARGE`, which `mobs` reports with a hint. Self-hosted (Docker) dashboards accept 50 MB.
+- **Endpoint**: use the public production domain. Protected preview deployments answer with a redirect or a 401; `mobs` stops and reports it instead of resending the upload as a `GET`. A dashboard under a sub-path (`https://example.com/observability`) works: `--endpoint` keeps the path.
+
 ## Compatibility
 
 |             | Expo (managed)                             | Bare React Native                                         |
@@ -111,6 +143,8 @@ mobs sourcemaps upload --platform ios|android --file <path.map>
      (--update-id <id> | --app-version <version> --build <build>)
 
 mobs sourcemaps upload-eas --dist dist --eas-json update.json
+
+mobs --help | --version
 ```
 
 ## License

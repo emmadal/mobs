@@ -1,21 +1,34 @@
-import { readFile } from 'node:fs/promises';
+import { readdir, readFile } from 'node:fs/promises';
+import { basename, join } from 'node:path';
 import { gzipSync } from 'node:zlib';
-/** Parses `--flag value` and `--flag=value` pairs. */
+export const PLATFORMS = ['ios', 'android'];
+/** Flags that never take a value, so `--help sourcemaps` keeps `sourcemaps` positional. */
+const BOOLEAN_FLAGS = new Set(['help', 'version']);
+const SHORT_FLAGS = { '-h': 'help', '-v': 'version' };
+/** Parses `--flag value` and `--flag=value` pairs, plus the `-h` and `-v` shorthands. */
 export function parseFlags(argv) {
     const flags = {};
     const positional = [];
     for (let index = 0; index < argv.length; index += 1) {
         const arg = argv[index];
+        const short = SHORT_FLAGS[arg];
+        if (short) {
+            flags[short] = 'true';
+            continue;
+        }
         if (!arg.startsWith('--')) {
             positional.push(arg);
             continue;
         }
-        const [name = '', inline] = arg.slice(2).split('=', 2);
+        const body = arg.slice(2);
+        const equals = body.indexOf('=');
+        const name = equals === -1 ? body : body.slice(0, equals);
         const next = argv[index + 1];
-        if (inline !== undefined) {
-            flags[name] = inline;
+        if (equals !== -1) {
+            // Split on the first `=` only: values such as URLs may contain more.
+            flags[name] = body.slice(equals + 1);
         }
-        else if (next && !next.startsWith('--')) {
+        else if (next !== undefined && !next.startsWith('--') && !BOOLEAN_FLAGS.has(name)) {
             flags[name] = next;
             index += 1;
         }
@@ -44,6 +57,35 @@ export function updateIdsFromEasJson(json) {
     }
     return ids;
 }
+const FAILURE_HINTS = {
+    401: 'use the project upload token (mobs_sk_..., Settings > project card), not the public ingest key',
+    413: 'the server refused the map size; the dashboard accepts 50 MB, but some hosts cap request bodies lower (Vercel Functions: 4.5 MB)',
+};
+function isRecord(value) {
+    return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+function parseJson(text) {
+    try {
+        return JSON.parse(text);
+    }
+    catch {
+        return undefined;
+    }
+}
+function isUploadResult(value) {
+    return (isRecord(value) &&
+        value.ok === true &&
+        typeof value.bundleKey === 'string' &&
+        (value.platform === 'ios' || value.platform === 'android'));
+}
+/** One line: the server's error code, or the start of a non-JSON body (an HTML error page). */
+function failureReason(text) {
+    const parsed = parseJson(text);
+    if (isRecord(parsed) && typeof parsed.error === 'string')
+        return parsed.error;
+    const compact = text.replace(/\s+/g, ' ').trim();
+    return compact.length > 200 ? `${compact.slice(0, 200)}...` : compact;
+}
 export async function uploadSourceMap(options) {
     const { endpoint, token, platform, key, file, fetchImpl = fetch } = options;
     if (!endpoint)
@@ -54,22 +96,90 @@ export async function uploadSourceMap(options) {
         throw new Error('--platform must be ios or android');
     const content = await readFile(file);
     JSON.parse(content.toString('utf8')); // fail fast on a non-JSON file
-    const url = new URL('/api/v1/sourcemaps', endpoint);
+    // Appended like the SDK transport does, so a dashboard served under a sub-path keeps it.
+    const url = new URL(`${endpoint.replace(/\/+$/, '')}/api/v1/sourcemaps`);
     url.searchParams.set('platform', platform);
     url.searchParams.set('bundleKey', key);
-    url.searchParams.set('fileName', file.split('/').pop() ?? 'bundle.map');
-    const response = await fetchImpl(url, {
-        method: 'POST',
-        headers: {
-            authorization: `Bearer ${token}`,
-            'content-type': 'application/json',
-            'content-encoding': 'gzip',
-        },
-        body: gzipSync(content),
-    });
+    url.searchParams.set('fileName', basename(file));
+    let response;
+    try {
+        response = await fetchImpl(url, {
+            method: 'POST',
+            headers: {
+                authorization: `Bearer ${token}`,
+                'content-type': 'application/json',
+                'content-encoding': 'gzip',
+            },
+            body: gzipSync(content),
+            // Following a 301/302 would resend the upload as a body-less GET; report it instead.
+            redirect: 'manual',
+        });
+    }
+    catch (error) {
+        // fetch() only says "fetch failed"; the cause names the network error (ECONNREFUSED, ENOTFOUND...).
+        const cause = error.cause;
+        const detail = cause?.code ?? cause?.message ?? error.message;
+        throw new Error(`Cannot reach ${url.origin}: ${detail}`);
+    }
+    if (response.status >= 300 && response.status < 400) {
+        const location = response.headers.get('location');
+        throw new Error(`Upload redirected (${response.status})${location ? ` to ${location}` : ''}: set --endpoint to the final dashboard URL. Password- or SSO-protected deployments cannot receive uploads.`);
+    }
     const text = await response.text();
-    if (!response.ok)
-        throw new Error(`Upload failed (${response.status}): ${text}`);
-    return JSON.parse(text);
+    if (!response.ok) {
+        const reason = failureReason(text);
+        const hint = FAILURE_HINTS[response.status];
+        throw new Error(`Upload failed (${response.status}${reason ? `: ${reason}` : ''})${hint ? `. Hint: ${hint}` : ''}`);
+    }
+    const result = parseJson(text);
+    if (!isUploadResult(result)) {
+        throw new Error(`Unexpected response from ${url.origin} (${response.status}): is --endpoint the dashboard URL?`);
+    }
+    return result;
 }
-//# sourceMappingURL=lib.js.map
+/** Source maps of one platform in an `expo export` / `eas update` output directory. */
+export function easMapDirectory(dist, platform) {
+    return join(dist, '_expo', 'static', 'js', platform);
+}
+export async function findMaps(dist, platform) {
+    const directory = easMapDirectory(dist, platform);
+    const files = await readdir(directory).catch(() => []);
+    return files
+        .filter((file) => file.endsWith('.map'))
+        .sort()
+        .map((file) => join(directory, file));
+}
+/**
+ * Uploads every map of an EAS Update under its `update:<id>` key. Fails when
+ * nothing would be uploaded, so a CI step never passes with maps missing.
+ */
+export async function uploadEasUpdate(options) {
+    const { dist, easJson, onUploaded, ...upload } = options;
+    const ids = updateIdsFromEasJson(JSON.parse(await readFile(easJson, 'utf8')));
+    const platforms = PLATFORMS.filter((platform) => ids[platform]);
+    if (platforms.length === 0) {
+        throw new Error(`No ios or android update ids in ${easJson}: pass the output of eas update --json`);
+    }
+    const plan = [];
+    for (const platform of platforms) {
+        const files = await findMaps(dist, platform);
+        if (files.length === 0) {
+            throw new Error(`No ${platform} source maps in ${easMapDirectory(dist, platform)}: check --dist and that the update was exported with source maps`);
+        }
+        plan.push({ platform, updateId: ids[platform], files });
+    }
+    const results = [];
+    for (const { platform, updateId, files } of plan) {
+        for (const file of files) {
+            const result = await uploadSourceMap({
+                ...upload,
+                platform,
+                key: bundleKey({ updateId }),
+                file,
+            });
+            onUploaded?.(file, result);
+            results.push(result);
+        }
+    }
+    return results;
+}

@@ -1,4 +1,9 @@
 {
   "extends": "./tsconfig.json",
+  "compilerOptions": {
+    // The package ships a CLI only: no typings, and no source maps pointing at unshipped src/.
+    "declaration": false,
+    "sourceMap": false
+  },
   "exclude": ["src/**/*.test.ts"]
 }

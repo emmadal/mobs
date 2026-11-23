@@ -1,15 +1,16 @@
 #!/usr/bin/env node
-import { readdir, readFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { createRequire } from 'node:module';
 import {
   bundleKey,
-  type Platform,
   parseFlags,
-  updateIdsFromEasJson,
+  type UploadResult,
+  uploadEasUpdate,
   uploadSourceMap,
 } from './lib.js';
 
-const HELP = `mobs: mobile-observability CLI
+const { version } = createRequire(import.meta.url)('../package.json') as { version: string };
+
+const HELP = `mobs ${version}: mobile-observability CLI
 
 Upload one source map:
   mobs sourcemaps upload --platform ios|android --file <path.map>
@@ -21,34 +22,38 @@ Upload the maps of an EAS Update (after \`eas update --json > update.json\`):
 Common flags (or environment variables):
   --endpoint  MOBS_ENDPOINT      Dashboard URL, e.g. https://observability.example.com
   --token     MOBS_UPLOAD_TOKEN  Project upload token (Settings > project card)
+
+  -h, --help     Show this help
+  -v, --version  Print the version
 `;
 
-async function findMaps(dist: string, platform: Platform): Promise<string[]> {
-  const directory = join(dist, '_expo', 'static', 'js', platform);
-  const files = await readdir(directory).catch(() => [] as string[]);
-  return files.filter((file) => file.endsWith('.map')).map((file) => join(directory, file));
+function fail(message: string): never {
+  console.error(`mobs: ${message}`);
+  process.exit(1);
+}
+
+function printUploaded(file: string, result: UploadResult): void {
+  const size = typeof result.sizeBytes === 'number' ? ` (${result.sizeBytes} bytes)` : '';
+  console.log(`Uploaded ${file} as ${result.platform} ${result.bundleKey}${size}`);
 }
 
 async function main(): Promise<void> {
   const { flags, positional } = parseFlags(process.argv.slice(2));
-  const [group, command] = positional;
-  if (group !== 'sourcemaps' || !command || flags.help) {
-    console.log(HELP);
-    // Help was requested or nothing was asked: not an error.
-    process.exit(flags.help || !group ? 0 : 1);
+  if (flags.version) {
+    console.log(version);
+    return;
   }
+  const [group, command] = positional;
+  if (flags.help || !group) {
+    console.log(HELP);
+    return;
+  }
+
   const endpoint = flags.endpoint ?? process.env.MOBS_ENDPOINT;
   const token = flags.token ?? process.env.MOBS_UPLOAD_TOKEN;
-  const requireFlag = (name: string): string => {
-    const value = flags[name];
-    if (!value) {
-      console.error(`mobs: missing --${name}`);
-      process.exit(1);
-    }
-    return value;
-  };
+  const requireFlag = (name: string): string => flags[name] ?? fail(`missing --${name}`);
 
-  if (command === 'upload') {
+  if (group === 'sourcemaps' && command === 'upload') {
     const file = requireFlag('file');
     const result = await uploadSourceMap({
       endpoint,
@@ -61,35 +66,25 @@ async function main(): Promise<void> {
       }),
       file,
     });
-    console.log(`Uploaded ${file} as ${result.platform} ${result.bundleKey}`);
+    printUploaded(file, result);
     return;
   }
 
-  if (command === 'upload-eas') {
-    const parsed: unknown = JSON.parse(await readFile(requireFlag('eas-json'), 'utf8'));
-    const ids = updateIdsFromEasJson(parsed);
-    for (const platform of ['ios', 'android'] as Platform[]) {
-      const updateId = ids[platform];
-      if (!updateId) continue;
-      for (const file of await findMaps(flags.dist ?? 'dist', platform)) {
-        const result = await uploadSourceMap({
-          endpoint,
-          token,
-          platform,
-          key: bundleKey({ updateId }),
-          file,
-        });
-        console.log(`Uploaded ${file} as ${result.platform} ${result.bundleKey}`);
-      }
-    }
+  if (group === 'sourcemaps' && command === 'upload-eas') {
+    await uploadEasUpdate({
+      endpoint,
+      token,
+      dist: flags.dist ?? 'dist',
+      easJson: requireFlag('eas-json'),
+      onUploaded: printUploaded,
+    });
     return;
   }
 
-  console.log(HELP);
-  process.exit(1);
+  console.error(HELP);
+  fail(`unknown command: ${positional.join(' ')}`);
 }
 
 main().catch((error: unknown) => {
-  console.error(`mobs: ${error instanceof Error ? error.message : error}`);
-  process.exit(1);
+  fail(error instanceof Error ? error.message : String(error));
 });

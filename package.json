@@ -2,6 +2,18 @@
   "name": "@mobile-observability/cli",
   "version": "0.1.0",
   "description": "mobs — upload source maps for mobile-observability (EAS Update and native builds). Works in Expo and bare React Native projects.",
+  "keywords": [
+    "react-native",
+    "expo",
+    "eas-update",
+    "source-maps",
+    "sourcemaps",
+    "hermes",
+    "symbolication",
+    "crash-reporting",
+    "observability",
+    "cli"
+  ],
   "license": "MIT",
   "author": "mobile-observability",
   "type": "module",
@@ -22,10 +34,14 @@
   "engines": {
     "node": ">=22"
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "node -e \"require('node:fs').rmSync('build',{recursive:true,force:true})\" && tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "prepublishOnly": "npm run build && npm test && node build/mobs.js --version"
   },
   "devDependencies": {
     "@types/node": "^24",
