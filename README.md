@@ -36,7 +36,7 @@ Credentials are the same for every command, and the endpoint is the variable you
 | `--endpoint` | `EXPO_PUBLIC_MOBS_ENDPOINT` | Your dashboard URL, e.g. `https://observability.example.com`                                                              |
 | `--token`    | `MOBS_UPLOAD_TOKEN`         | The project's **upload token**, shown once as a `MOBS_UPLOAD_TOKEN=` line in Settings (secret, not the public ingest key) |
 
-`mobs` looks for each value in this order: the flag, the process environment, then `.env.local` and `.env` in the current directory (the files Expo loads). So an app set up like this needs no flags:
+`mobs` looks for each value in this order: the flag, the process environment, then `.env.local` and `.env` in the current directory (the files Expo loads). So on your machine, an app set up like this needs no flags:
 
 ```sh
 # .env
@@ -46,6 +46,8 @@ EXPO_PUBLIC_MOBS_KEY=mobs_pk_...   # read by the app, not by mobs
 # .env.local (git-ignored)
 MOBS_UPLOAD_TOKEN=mobs_sk_...
 ```
+
+When the token comes from a flag or the environment (a CI secret, or a token exported in your shell), the endpoint must come from a flag or the environment too: `mobs` then refuses an endpoint found only in `.env`, so a committed or pull-request `.env` cannot send the secret to another server. In CI, set `EXPO_PUBLIC_MOBS_ENDPOINT` next to `MOBS_UPLOAD_TOKEN`.
 
 Never prefix the upload token with `EXPO_PUBLIC_`: Expo would inline it into the app bundle. `MOBS_ENDPOINT` is still read and overrides `EXPO_PUBLIC_MOBS_ENDPOINT`, for the rare case where uploads go through a different URL than the app.
 
@@ -72,12 +74,13 @@ To automate it, add a script to `package.json`:
 }
 ```
 
-Keep the token out of `eas.json`: `build.env` is not a secret store, and a token placed there can leak with the build environment. In CI, the endpoint comes from the app's committed `.env`; only the token needs a secret, for example in GitHub Actions:
+Keep the token out of `eas.json`: `build.env` is not a secret store, and a token placed there can leak with the build environment. Set both values in the CI job, the token as a secret, for example in GitHub Actions:
 
 ```yaml
 - run: eas update --json > update.json
 - run: npx --yes @mobile-observability/cli sourcemaps upload-eas --dist dist --eas-json update.json
   env:
+    EXPO_PUBLIC_MOBS_ENDPOINT: https://observability.example.com
     MOBS_UPLOAD_TOKEN: ${{ secrets.MOBS_UPLOAD_TOKEN }}
 ```
 
@@ -119,7 +122,7 @@ Every failure exits with code 1 and a one-line reason, so a CI step never passes
 ### In a Vercel build
 
 1. Add the CLI as a dev dependency (see [Install](#install)); Vercel installs devDependencies for the build.
-2. In **Project Settings → Environment Variables**, add `MOBS_UPLOAD_TOKEN` and mark it **Sensitive**. Add `EXPO_PUBLIC_MOBS_ENDPOINT` too unless the app's committed `.env` already sets it.
+2. In **Project Settings → Environment Variables**, add `MOBS_UPLOAD_TOKEN` and mark it **Sensitive**. Add `EXPO_PUBLIC_MOBS_ENDPOINT` too: with a token from the environment, `mobs` ignores an endpoint found only in `.env`.
 3. Call it after the build step that writes `dist/` and `update.json`, for example as a `postbuild` script:
 
    ```json

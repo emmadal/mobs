@@ -63,13 +63,24 @@ async function readDotEnv(cwd) {
  * by the app), plus `MOBS_UPLOAD_TOKEN` for uploads. Flags win, then the
  * process environment, then the project's `.env.local` and `.env`.
  * `MOBS_ENDPOINT` still overrides the endpoint for the CLI alone.
+ *
+ * A token set by the operator (flag or environment, e.g. a CI secret) is only
+ * sent to an endpoint the operator set too: a `.env` file is repository
+ * content, and a pull request that edits it must not redirect the secret.
  */
 export async function resolveCredentials(flags, env = process.env, cwd = process.cwd()) {
     const files = await readDotEnv(cwd);
-    const read = (name) => env[name] || files[name] || undefined;
+    const fromEnv = (name) => env[name] || undefined;
+    const fromFiles = (name) => files[name] || undefined;
+    const operatorToken = flags.token ?? fromEnv('MOBS_UPLOAD_TOKEN');
+    const operatorEndpoint = flags.endpoint ?? fromEnv('MOBS_ENDPOINT') ?? fromEnv('EXPO_PUBLIC_MOBS_ENDPOINT');
+    const fileEndpoint = fromFiles('MOBS_ENDPOINT') ?? fromFiles('EXPO_PUBLIC_MOBS_ENDPOINT');
+    if (operatorToken && !operatorEndpoint && fileEndpoint) {
+        throw new Error('MOBS_UPLOAD_TOKEN comes from the environment or --token, so the endpoint must too: set EXPO_PUBLIC_MOBS_ENDPOINT in the environment or pass --endpoint. The value in .env is not used with it, so a committed file cannot redirect the token.');
+    }
     return {
-        endpoint: flags.endpoint ?? read('MOBS_ENDPOINT') ?? read('EXPO_PUBLIC_MOBS_ENDPOINT'),
-        token: flags.token ?? read('MOBS_UPLOAD_TOKEN'),
+        endpoint: operatorEndpoint ?? fileEndpoint,
+        token: operatorToken ?? fromFiles('MOBS_UPLOAD_TOKEN'),
     };
 }
 /** `update:<id>` for an EAS Update bundle, `build:<version>+<build>` for the embedded one. */

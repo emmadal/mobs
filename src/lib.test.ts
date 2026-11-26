@@ -301,10 +301,13 @@ describe('resolveCredentials', () => {
     await expect(
       resolveCredentials(
         {},
-        { MOBS_UPLOAD_TOKEN: 'from-process', EXPO_PUBLIC_MOBS_ENDPOINT: '' },
+        {
+          MOBS_UPLOAD_TOKEN: 'from-process',
+          EXPO_PUBLIC_MOBS_ENDPOINT: 'https://process.example.com',
+        },
         cwd,
       ),
-    ).resolves.toEqual({ endpoint: 'https://local.example.com', token: 'from-process' });
+    ).resolves.toEqual({ endpoint: 'https://process.example.com', token: 'from-process' });
     await expect(
       resolveCredentials(
         { endpoint: 'https://flag.example.com', token: 'from-flag' },
@@ -312,6 +315,24 @@ describe('resolveCredentials', () => {
         cwd,
       ),
     ).resolves.toEqual({ endpoint: 'https://flag.example.com', token: 'from-flag' });
+  });
+
+  it('never sends a token from the environment or a flag to an endpoint read from a .env file', async () => {
+    // A committed (or pull-request) .env must not redirect a CI secret or a shell token.
+    const cwd = await project({ '.env': 'EXPO_PUBLIC_MOBS_ENDPOINT=https://attacker.example.com' });
+    const refusal = /MOBS_UPLOAD_TOKEN comes from the environment or --token/;
+    await expect(resolveCredentials({}, { MOBS_UPLOAD_TOKEN: 'ci-secret' }, cwd)).rejects.toThrow(
+      refusal,
+    );
+    await expect(resolveCredentials({ token: 'flag-secret' }, {}, cwd)).rejects.toThrow(refusal);
+    // The same token with an endpoint the operator set is fine.
+    await expect(
+      resolveCredentials(
+        {},
+        { MOBS_UPLOAD_TOKEN: 'ci-secret', MOBS_ENDPOINT: 'https://ok.example.com' },
+        cwd,
+      ),
+    ).resolves.toEqual({ endpoint: 'https://ok.example.com', token: 'ci-secret' });
   });
 
   it('lets MOBS_ENDPOINT override the app endpoint for the CLI only', async () => {
