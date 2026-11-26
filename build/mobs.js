@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { createRequire } from 'node:module';
-import { bundleKey, parseFlags, uploadEasUpdate, uploadSourceMap, } from './lib.js';
+import { bundleKey, parseFlags, resolveCredentials, uploadEasUpdate, uploadSourceMap, } from './lib.js';
 const { version } = createRequire(import.meta.url)('../package.json');
 const HELP = `mobs ${version}: mobile-observability CLI
 
@@ -11,9 +11,10 @@ Upload one source map:
 Upload the maps of an EAS Update (after \`eas update --json > update.json\`):
   mobs sourcemaps upload-eas --dist dist --eas-json update.json
 
-Common flags (or environment variables):
-  --endpoint  MOBS_ENDPOINT      Dashboard URL, e.g. https://observability.example.com
-  --token     MOBS_UPLOAD_TOKEN  Project upload token (Settings > project card)
+Credentials (flag, or variable from the environment, .env.local or .env):
+  --endpoint  EXPO_PUBLIC_MOBS_ENDPOINT  Dashboard URL, the same variable the app uses
+                                         (MOBS_ENDPOINT overrides it for the CLI only)
+  --token     MOBS_UPLOAD_TOKEN          Secret project upload token (Settings > project card)
 
   -h, --help     Show this help
   -v, --version  Print the version
@@ -37,8 +38,7 @@ async function main() {
         console.log(HELP);
         return;
     }
-    const endpoint = flags.endpoint ?? process.env.MOBS_ENDPOINT;
-    const token = flags.token ?? process.env.MOBS_UPLOAD_TOKEN;
+    const { endpoint, token } = await resolveCredentials(flags);
     const requireFlag = (name) => flags[name] ?? fail(`missing --${name}`);
     if (group === 'sourcemaps' && command === 'upload') {
         const file = requireFlag('file');

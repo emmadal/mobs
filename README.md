@@ -29,12 +29,25 @@ npm install --save-dev --install-links github:emmadal/mobs
 
 > `--install-links` tells npm to copy the git checkout instead of symlinking it; without it npm points `node_modules` at a temporary clone that it then deletes. `npx` and `bun` do not need the flag.
 
-Credentials are the same for every command:
+Credentials are the same for every command, and the endpoint is the variable your app already uses:
 
-| Flag         | Environment variable | What it is                                                                                   |
-| ------------ | -------------------- | -------------------------------------------------------------------------------------------- |
-| `--endpoint` | `MOBS_ENDPOINT`      | Your dashboard URL, e.g. `https://observability.example.com`                                 |
-| `--token`    | `MOBS_UPLOAD_TOKEN`  | The project's **upload token** (Settings → project card — secret, not the public ingest key) |
+| Flag         | Variable                    | What it is                                                                                                                |
+| ------------ | --------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `--endpoint` | `EXPO_PUBLIC_MOBS_ENDPOINT` | Your dashboard URL, e.g. `https://observability.example.com`                                                              |
+| `--token`    | `MOBS_UPLOAD_TOKEN`         | The project's **upload token**, shown once as a `MOBS_UPLOAD_TOKEN=` line in Settings (secret, not the public ingest key) |
+
+`mobs` looks for each value in this order: the flag, the process environment, then `.env.local` and `.env` in the current directory (the files Expo loads). So an app set up like this needs no flags:
+
+```sh
+# .env
+EXPO_PUBLIC_MOBS_ENDPOINT=https://observability.example.com
+EXPO_PUBLIC_MOBS_KEY=mobs_pk_...   # read by the app, not by mobs
+
+# .env.local (git-ignored)
+MOBS_UPLOAD_TOKEN=mobs_sk_...
+```
+
+Never prefix the upload token with `EXPO_PUBLIC_`: Expo would inline it into the app bundle. `MOBS_ENDPOINT` is still read and overrides `EXPO_PUBLIC_MOBS_ENDPOINT`, for the rare case where uploads go through a different URL than the app.
 
 ## Expo (managed workflow)
 
@@ -59,17 +72,16 @@ To automate it, add a script to `package.json`:
 }
 ```
 
-Keep the token out of `eas.json`: `build.env` is not a secret store, and a token placed there can leak with the build environment. Set `MOBS_ENDPOINT` and `MOBS_UPLOAD_TOKEN` in the CI job that runs the update, for example GitHub Actions:
+Keep the token out of `eas.json`: `build.env` is not a secret store, and a token placed there can leak with the build environment. In CI, the endpoint comes from the app's committed `.env`; only the token needs a secret, for example in GitHub Actions:
 
 ```yaml
 - run: eas update --json > update.json
 - run: npx --yes @mobile-observability/cli sourcemaps upload-eas --dist dist --eas-json update.json
   env:
-    MOBS_ENDPOINT: https://observability.example.com
     MOBS_UPLOAD_TOKEN: ${{ secrets.MOBS_UPLOAD_TOKEN }}
 ```
 
-`eas.json` stays useful for build profiles. If an EAS build hook invokes the CLI, store the token as a **sensitive** EAS environment variable and reference it from the hook — never inline it in `env`.
+`eas.json` stays useful for build profiles. If an EAS build hook invokes the CLI, add `MOBS_UPLOAD_TOKEN` as a **sensitive** or **secret** EAS environment variable next to the app's `EXPO_PUBLIC_MOBS_*` ones: EAS Build exposes them all to the hook, so `mobs` finds both values — never inline the token in `env`.
 
 ### Local export
 
@@ -107,7 +119,7 @@ Every failure exits with code 1 and a one-line reason, so a CI step never passes
 ### In a Vercel build
 
 1. Add the CLI as a dev dependency (see [Install](#install)); Vercel installs devDependencies for the build.
-2. In **Project Settings → Environment Variables**, add `MOBS_ENDPOINT` and `MOBS_UPLOAD_TOKEN`, and mark the token **Sensitive**.
+2. In **Project Settings → Environment Variables**, add `MOBS_UPLOAD_TOKEN` and mark it **Sensitive**. Add `EXPO_PUBLIC_MOBS_ENDPOINT` too unless the app's committed `.env` already sets it.
 3. Call it after the build step that writes `dist/` and `update.json`, for example as a `postbuild` script:
 
    ```json

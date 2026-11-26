@@ -1,5 +1,6 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
+import { parseEnv } from 'node:util';
 import { gzipSync } from 'node:zlib';
 export const PLATFORMS = ['ios', 'android'];
 /** Flags that never take a value, so `--help sourcemaps` keeps `sourcemaps` positional. */
@@ -37,6 +38,39 @@ export function parseFlags(argv) {
         }
     }
     return { flags, positional };
+}
+/** Read in this order, so `.env.local` overrides `.env`, as in Expo CLI. */
+const DOTENV_FILES = ['.env.local', '.env'];
+async function readDotEnv(cwd) {
+    const merged = {};
+    for (const name of DOTENV_FILES) {
+        let content;
+        try {
+            content = await readFile(join(cwd, name), 'utf8');
+        }
+        catch {
+            continue;
+        }
+        for (const [key, value] of Object.entries(parseEnv(content))) {
+            if (value && merged[key] === undefined)
+                merged[key] = value;
+        }
+    }
+    return merged;
+}
+/**
+ * The app and the CLI share one setup: `EXPO_PUBLIC_MOBS_ENDPOINT` (also read
+ * by the app), plus `MOBS_UPLOAD_TOKEN` for uploads. Flags win, then the
+ * process environment, then the project's `.env.local` and `.env`.
+ * `MOBS_ENDPOINT` still overrides the endpoint for the CLI alone.
+ */
+export async function resolveCredentials(flags, env = process.env, cwd = process.cwd()) {
+    const files = await readDotEnv(cwd);
+    const read = (name) => env[name] || files[name] || undefined;
+    return {
+        endpoint: flags.endpoint ?? read('MOBS_ENDPOINT') ?? read('EXPO_PUBLIC_MOBS_ENDPOINT'),
+        token: flags.token ?? read('MOBS_UPLOAD_TOKEN'),
+    };
 }
 /** `update:<id>` for an EAS Update bundle, `build:<version>+<build>` for the embedded one. */
 export function bundleKey(options) {
@@ -89,7 +123,7 @@ function failureReason(text) {
 export async function uploadSourceMap(options) {
     const { endpoint, token, platform, key, file, fetchImpl = fetch } = options;
     if (!endpoint)
-        throw new Error('Missing --endpoint (or MOBS_ENDPOINT)');
+        throw new Error('Missing --endpoint (or EXPO_PUBLIC_MOBS_ENDPOINT)');
     if (!token)
         throw new Error('Missing --token (or MOBS_UPLOAD_TOKEN)');
     if (platform !== 'ios' && platform !== 'android')

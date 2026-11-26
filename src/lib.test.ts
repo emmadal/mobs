@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import {
   bundleKey,
   parseFlags,
+  resolveCredentials,
   updateIdsFromEasJson,
   uploadEasUpdate,
   uploadSourceMap,
@@ -263,5 +264,74 @@ describe('uploadEasUpdate', () => {
     await expect(uploadEasUpdate({ ...upload, dist, easJson, fetchImpl })).rejects.toThrow(
       'No ios or android update ids',
     );
+  });
+});
+
+describe('resolveCredentials', () => {
+  async function project(files: Record<string, string>): Promise<string> {
+    const dir = await mkdtemp(join(tmpdir(), 'mobs-env-'));
+    for (const [name, content] of Object.entries(files)) await writeFile(join(dir, name), content);
+    return dir;
+  }
+
+  it("reads the app's endpoint and the upload token from the project's .env", async () => {
+    const cwd = await project({
+      '.env': [
+        '# shared with the app',
+        'EXPO_PUBLIC_MOBS_ENDPOINT=https://obs.example.com',
+        'EXPO_PUBLIC_MOBS_KEY=mobs_pk_public',
+        'MOBS_UPLOAD_TOKEN="mobs_sk_secret"',
+      ].join('\n'),
+    });
+    await expect(resolveCredentials({}, {}, cwd)).resolves.toEqual({
+      endpoint: 'https://obs.example.com',
+      token: 'mobs_sk_secret',
+    });
+  });
+
+  it('prefers flags, then the environment, then .env.local, then .env', async () => {
+    const cwd = await project({
+      '.env': 'EXPO_PUBLIC_MOBS_ENDPOINT=https://env.example.com\nMOBS_UPLOAD_TOKEN=from-env-file',
+      '.env.local': 'EXPO_PUBLIC_MOBS_ENDPOINT=https://local.example.com',
+    });
+    await expect(resolveCredentials({}, {}, cwd)).resolves.toEqual({
+      endpoint: 'https://local.example.com',
+      token: 'from-env-file',
+    });
+    await expect(
+      resolveCredentials(
+        {},
+        { MOBS_UPLOAD_TOKEN: 'from-process', EXPO_PUBLIC_MOBS_ENDPOINT: '' },
+        cwd,
+      ),
+    ).resolves.toEqual({ endpoint: 'https://local.example.com', token: 'from-process' });
+    await expect(
+      resolveCredentials(
+        { endpoint: 'https://flag.example.com', token: 'from-flag' },
+        { MOBS_UPLOAD_TOKEN: 'from-process' },
+        cwd,
+      ),
+    ).resolves.toEqual({ endpoint: 'https://flag.example.com', token: 'from-flag' });
+  });
+
+  it('lets MOBS_ENDPOINT override the app endpoint for the CLI only', async () => {
+    const cwd = await project({ '.env': 'EXPO_PUBLIC_MOBS_ENDPOINT=https://app.example.com' });
+    await expect(
+      resolveCredentials({}, { MOBS_ENDPOINT: 'https://cli.example.com' }, cwd),
+    ).resolves.toEqual({ endpoint: 'https://cli.example.com', token: undefined });
+  });
+
+  it('works without any .env file', async () => {
+    const cwd = await project({});
+    await expect(resolveCredentials({}, {}, cwd)).resolves.toEqual({
+      endpoint: undefined,
+      token: undefined,
+    });
+  });
+
+  it('names the shared app variable when the endpoint is missing', async () => {
+    await expect(
+      uploadSourceMap({ token: 'mobs_sk_x', platform: 'ios', key: 'build:1+1', file: 'x.map' }),
+    ).rejects.toThrow('Missing --endpoint (or EXPO_PUBLIC_MOBS_ENDPOINT)');
   });
 });

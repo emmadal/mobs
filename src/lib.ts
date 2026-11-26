@@ -1,5 +1,6 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
+import { parseEnv } from 'node:util';
 import { gzipSync } from 'node:zlib';
 
 export type Platform = 'ios' | 'android';
@@ -47,6 +48,49 @@ export function parseFlags(argv: string[]): FlagParse {
     }
   }
   return { flags, positional };
+}
+
+export interface Credentials {
+  endpoint?: string;
+  token?: string;
+}
+
+/** Read in this order, so `.env.local` overrides `.env`, as in Expo CLI. */
+const DOTENV_FILES = ['.env.local', '.env'] as const;
+
+async function readDotEnv(cwd: string): Promise<Record<string, string>> {
+  const merged: Record<string, string> = {};
+  for (const name of DOTENV_FILES) {
+    let content: string;
+    try {
+      content = await readFile(join(cwd, name), 'utf8');
+    } catch {
+      continue;
+    }
+    for (const [key, value] of Object.entries(parseEnv(content))) {
+      if (value && merged[key] === undefined) merged[key] = value;
+    }
+  }
+  return merged;
+}
+
+/**
+ * The app and the CLI share one setup: `EXPO_PUBLIC_MOBS_ENDPOINT` (also read
+ * by the app), plus `MOBS_UPLOAD_TOKEN` for uploads. Flags win, then the
+ * process environment, then the project's `.env.local` and `.env`.
+ * `MOBS_ENDPOINT` still overrides the endpoint for the CLI alone.
+ */
+export async function resolveCredentials(
+  flags: Flags,
+  env: NodeJS.ProcessEnv = process.env,
+  cwd: string = process.cwd(),
+): Promise<Credentials> {
+  const files = await readDotEnv(cwd);
+  const read = (name: string): string | undefined => env[name] || files[name] || undefined;
+  return {
+    endpoint: flags.endpoint ?? read('MOBS_ENDPOINT') ?? read('EXPO_PUBLIC_MOBS_ENDPOINT'),
+    token: flags.token ?? read('MOBS_UPLOAD_TOKEN'),
+  };
 }
 
 /** `update:<id>` for an EAS Update bundle, `build:<version>+<build>` for the embedded one. */
@@ -128,7 +172,7 @@ function failureReason(text: string): string {
 
 export async function uploadSourceMap(options: UploadOptions): Promise<UploadResult> {
   const { endpoint, token, platform, key, file, fetchImpl = fetch } = options;
-  if (!endpoint) throw new Error('Missing --endpoint (or MOBS_ENDPOINT)');
+  if (!endpoint) throw new Error('Missing --endpoint (or EXPO_PUBLIC_MOBS_ENDPOINT)');
   if (!token) throw new Error('Missing --token (or MOBS_UPLOAD_TOKEN)');
   if (platform !== 'ios' && platform !== 'android')
     throw new Error('--platform must be ios or android');
